@@ -1,0 +1,16 @@
+.env
+.env.local
+.venv/
+__pycache__/
+.pytest_cache/
+pytest-cache-files-*/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+.next/
+dist/
+coverage/
+*.log
+screenshots/*.png
+screenshots/*.jpg
+screenshots/*.webp
