@@ -107,6 +107,10 @@ CREATE TABLE IF NOT EXISTS score_reports (
     delta INTEGER NOT NULL,
     before_dimensions JSONB NOT NULL,
     after_dimensions JSONB NOT NULL,
+    current_perception JSONB DEFAULT '{}',
+    brand_input JSONB DEFAULT '{}',
+    gap_analysis JSONB DEFAULT '{}',
+    gap_score INTEGER,
     action_plan JSONB DEFAULT '[]',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );

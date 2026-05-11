@@ -7,6 +7,7 @@ import os
 from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import text
 from sqlalchemy.orm import DeclarativeBase
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,16 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text("ALTER TABLE score_reports ADD COLUMN IF NOT EXISTS current_perception JSONB DEFAULT '{}'::jsonb")
+        )
+        await conn.execute(
+            text("ALTER TABLE score_reports ADD COLUMN IF NOT EXISTS brand_input JSONB DEFAULT '{}'::jsonb")
+        )
+        await conn.execute(
+            text("ALTER TABLE score_reports ADD COLUMN IF NOT EXISTS gap_analysis JSONB DEFAULT '{}'::jsonb")
+        )
+        await conn.execute(text("ALTER TABLE score_reports ADD COLUMN IF NOT EXISTS gap_score INTEGER"))
     logger.info("Database tables verified")
 
 

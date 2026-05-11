@@ -10,6 +10,7 @@ from backend.app.services.agent_simulator import AgentSimulator
 from backend.app.services.failure_detector import FailureDetector
 from backend.app.services.fix_generator import FixGenerator
 from backend.app.services.forensics_engine import ForensicsEngine
+from backend.app.services.perception_engine import PerceptionEngine
 from backend.app.services.persona_engine import PersonaEngine
 from backend.app.services.resimulation_runner import ResimulationRunner
 from backend.app.services.score_engine import ScoreEngine
@@ -29,6 +30,7 @@ class AuditPipeline:
         detector: FailureDetector | None = None,
         forensics: ForensicsEngine | None = None,
         fixes: FixGenerator | None = None,
+        perception: PerceptionEngine | None = None,
         runner: ResimulationRunner | None = None,
         scorer: ScoreEngine | None = None,
     ) -> None:
@@ -40,6 +42,7 @@ class AuditPipeline:
         self.detector = detector or FailureDetector()
         self.forensics = forensics or ForensicsEngine()
         self.fixes = fixes or FixGenerator()
+        self.perception = perception or PerceptionEngine()
         self.runner = runner or ResimulationRunner()
         self.scorer = scorer or ScoreEngine()
 
@@ -56,6 +59,13 @@ class AuditPipeline:
         simulations = await self.simulator.simulate_many(store_context, queries, demo_mode=demo_mode)
         verifications = await self.detector.classify_many(store_context, simulations, demo_mode=demo_mode)
         findings = await self.forensics.analyze_many(store_context, simulations, verifications, demo_mode=demo_mode)
+        current_perception = await self.perception.generate(
+            store_context,
+            simulations,
+            verifications,
+            findings,
+            demo_mode=demo_mode,
+        )
         fixes = await self.fixes.generate_many(store_context, findings, queries, demo_mode=demo_mode)
         fixed_context = self.runner.apply_fixes(store_context, fixes)
         failed_query_ids = {verification.query_id for verification in verifications if verification.classification != "CONFIDENT_CORRECT"}
@@ -73,6 +83,7 @@ class AuditPipeline:
         ]
         combined_after_verifications.extend(after_verifications)
         score = self.scorer.calculate(queries, verifications, combined_after_verifications, store_context, fixed_context)
+        score.current_perception = current_perception
         failures = build_failure_replays(simulations, verifications, findings, fixes, after_simulations, after_verifications)
         failed_queries = sum(1 for verification in verifications if verification.classification != "CONFIDENT_CORRECT")
         return AuditResult(

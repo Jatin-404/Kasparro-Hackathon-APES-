@@ -15,6 +15,10 @@ export interface AuditResult {
     delta: number;
     before_dimensions: Array<ApiDimension>;
     after_dimensions: Array<ApiDimension>;
+    current_perception?: CurrentPerception | null;
+    brand_input?: BrandGapRequest | null;
+    gap_analysis?: BrandGapAnalysis | null;
+    gap_score?: number | null;
   };
   failures: Array<ApiFailure>;
   failed_queries: number;
@@ -23,9 +27,50 @@ export interface AuditResult {
   action_plan: string[];
 }
 
+export interface CurrentPerception {
+  perception_summary: string;
+  perceived_as: string;
+  confidence_level: "very low" | "low" | "medium" | "high";
+  confidence_reason: string;
+  biggest_perception_problems: string[];
+}
+
+export interface BrandGapRequest {
+  brand_positioning: string;
+  brand_adjectives: string[];
+  target_customer: string;
+  must_get_right: string;
+  must_never_say: string;
+}
+
+export interface BrandGapAnalysis {
+  gap_score: number;
+  gap_summary: string;
+  aligned_areas: string[];
+  misaligned_areas: Array<{
+    desired: string;
+    current: string;
+    caused_by: string;
+    fix_priority: "high" | "medium" | "low";
+  }>;
+  must_never_say_risk: {
+    at_risk: boolean;
+    reason: string;
+  };
+  perception_blockers: Array<{
+    blocker: string;
+    data_needed: string;
+    estimated_gap_reduction: number;
+  }>;
+  if_all_fixed: {
+    projected_perception: string;
+    projected_gap_score: number;
+  };
+}
+
 export interface AuditProgressEvent {
   type: "progress" | "result" | "error";
-  stage?: "crawl" | "personas" | "simulations" | "verification" | "forensics" | "fixes" | "resimulation" | "scoring";
+  stage?: "crawl" | "personas" | "simulations" | "verification" | "forensics" | "perception" | "fixes" | "resimulation" | "scoring";
   status?: "started" | "running" | "complete";
   message?: string;
   current?: number;
@@ -138,6 +183,26 @@ export async function runAuditStream(
     throw new Error("Streaming audit ended before returning a final report");
   }
   return finalResult;
+}
+
+export async function analyzeBrandGap(auditId: string, payload: BrandGapRequest): Promise<BrandGapAnalysis> {
+  const endpoint = `${API_BASE}/api/audit/${auditId}/brand-gap`;
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "network request failed";
+    throw new Error(`Could not reach APES backend at ${endpoint}: ${reason}`);
+  }
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Brand gap analysis failed with HTTP ${response.status}: ${detail}`);
+  }
+  return response.json();
 }
 
 export function saveAudit(result: AuditResult) {

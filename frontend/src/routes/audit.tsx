@@ -42,6 +42,7 @@ const STAGE_INDEX: Record<string, number> = {
   simulations: 2,
   verification: 3,
   forensics: 3,
+  perception: 3,
   fixes: 4,
   resimulation: 4,
   scoring: 5,

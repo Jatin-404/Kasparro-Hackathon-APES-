@@ -115,6 +115,17 @@ class ScoreReport(BaseModel):
     delta: int
     before_dimensions: list[DimensionScore]
     after_dimensions: list[DimensionScore]
+    current_perception: "CurrentPerception | None" = None
+
+
+class CurrentPerception(BaseModel):
+    """How AI shopping agents currently perceive the store from simulations."""
+
+    perception_summary: str
+    perceived_as: str
+    confidence_level: Literal["very low", "low", "medium", "high"]
+    confidence_reason: str
+    biggest_perception_problems: list[str]
 
 
 class FailureReplay(BaseModel):
@@ -157,6 +168,59 @@ class AuditRequest(BaseModel):
 
     store_url: str = "hackathon-store.myshopify.com"
     demo_mode: bool = True
+
+
+class BrandGapRequest(BaseModel):
+    """Merchant-provided desired brand representation."""
+
+    brand_positioning: str
+    brand_adjectives: list[str]
+    target_customer: str
+    must_get_right: str = ""
+    must_never_say: str = ""
+
+
+class MisalignedArea(BaseModel):
+    """One mismatch between desired representation and current perception."""
+
+    desired: str
+    current: str
+    caused_by: str
+    fix_priority: Literal["high", "medium", "low"]
+
+
+class MustNeverSayRisk(BaseModel):
+    """Whether AI agents are likely to say the merchant's feared perception."""
+
+    at_risk: bool
+    reason: str
+
+
+class PerceptionBlocker(BaseModel):
+    """A concrete data blocker preventing the desired perception."""
+
+    blocker: str
+    data_needed: str
+    estimated_gap_reduction: int
+
+
+class ProjectedPerception(BaseModel):
+    """Projected perception after fixing all blockers."""
+
+    projected_perception: str
+    projected_gap_score: int
+
+
+class BrandGapAnalysis(BaseModel):
+    """AI comparison of current perception against desired merchant positioning."""
+
+    gap_score: int
+    gap_summary: str
+    aligned_areas: list[str]
+    misaligned_areas: list[MisalignedArea]
+    must_never_say_risk: MustNeverSayRisk
+    perception_blockers: list[PerceptionBlocker]
+    if_all_fixed: ProjectedPerception
 
 
 class CrawlRequest(BaseModel):

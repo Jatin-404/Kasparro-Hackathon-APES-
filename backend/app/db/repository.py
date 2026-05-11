@@ -78,6 +78,11 @@ async def get_recent_audits(db: AsyncSession, limit: int = 10) -> list[Audit]:
     return list(result.scalars().all())
 
 
+async def get_store_context(db: AsyncSession, audit_id: str) -> StoreContext | None:
+    result = await db.execute(select(StoreContext).where(StoreContext.audit_id == audit_id))
+    return result.scalar_one_or_none()
+
+
 async def save_store_context(
     db: AsyncSession,
     audit_id: str,
@@ -226,10 +231,40 @@ async def save_score_report(
             delta=score["delta"],
             before_dimensions=score["before_dimensions"],
             after_dimensions=score["after_dimensions"],
+            current_perception=score.get("current_perception") or {},
             action_plan=action_plan,
         )
     )
     await db.flush()
+
+
+async def save_current_perception(db: AsyncSession, audit_id: str, perception: dict[str, Any]) -> None:
+    """Save AI-generated current perception summary for an audit score report."""
+
+    await db.execute(
+        update(ScoreReport)
+        .where(ScoreReport.audit_id == audit_id)
+        .values(current_perception=perception)
+    )
+
+
+async def save_brand_gap(
+    db: AsyncSession,
+    audit_id: str,
+    brand_input: dict[str, Any],
+    gap_analysis: dict[str, Any],
+) -> None:
+    """Save merchant brand input and the generated perception gap analysis."""
+
+    await db.execute(
+        update(ScoreReport)
+        .where(ScoreReport.audit_id == audit_id)
+        .values(
+            brand_input=brand_input,
+            gap_analysis=gap_analysis,
+            gap_score=gap_analysis.get("gap_score"),
+        )
+    )
 
 
 async def get_score_report(db: AsyncSession, audit_id: str) -> ScoreReport | None:

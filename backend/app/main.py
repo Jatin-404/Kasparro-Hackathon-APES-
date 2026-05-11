@@ -13,8 +13,9 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from backend.app.models import AuditRequest, AuditResult, CrawlRequest, ErrorResponse
+from backend.app.models import AuditRequest, AuditResult, BrandGapRequest, CrawlRequest, CurrentPerception, ErrorResponse
 from backend.app.services.audit_pipeline import AuditPipeline, audit_id_for, build_failure_replays
+from backend.app.services.brand_gap_engine import BrandGapEngine
 from backend.app.services.full_store_crawler import FullStoreCrawler, build_demo_store_context
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +38,7 @@ app.add_middleware(
 )
 
 pipeline = AuditPipeline()
+brand_gap_engine = BrandGapEngine()
 
 try:
     from backend.app.db.engine import db_enabled, db_required, get_db, init_db
@@ -263,6 +265,33 @@ async def apply_saved_fix(audit_id: str, query_id: str, db: Any = Depends(get_db
     return {"status": "applied", "audit_id": audit_id, "query_id": query_id}
 
 
+@app.post("/api/audit/{audit_id}/brand-gap")
+async def analyze_brand_gap(
+    audit_id: str,
+    request: BrandGapRequest,
+    db: Any = Depends(get_db),
+) -> dict[str, Any]:
+    """Compare current AI perception against merchant desired representation."""
+
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Database persistence is not installed")
+    if not db_enabled():
+        raise HTTPException(status_code=503, detail="Database persistence is disabled")
+    audit = await repo.get_audit_by_id(db, audit_id)
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    score = await repo.get_score_report(db, audit_id)
+    if not score or not score.current_perception:
+        raise HTTPException(status_code=409, detail="Current perception is not available for this audit")
+    store_context = await repo.get_store_context(db, audit_id)
+    gaps_detected = store_context.gaps_detected if store_context else []
+    current_perception = CurrentPerception.model_validate(score.current_perception)
+    analysis = await brand_gap_engine.analyze(current_perception, request, gaps_detected)
+    analysis_data = analysis.model_dump(mode="json")
+    await repo.save_brand_gap(db, audit_id, request.model_dump(mode="json"), analysis_data)
+    return analysis_data
+
+
 def stream_event(event_type: str, **payload: object) -> str:
     """Serialize one frontend progress event as a newline-delimited JSON row."""
 
@@ -353,6 +382,21 @@ async def audit_event_stream(request: AuditRequest) -> AsyncIterator[str]:
         findings = await pipeline.forensics.analyze_many(store_context, simulations, verifications, demo_mode=demo_mode)
         yield stream_event("progress", stage="forensics", status="complete", message=f"Generated {len(findings)} forensic findings")
 
+        yield stream_event("progress", stage="perception", status="started", message="Summarizing current AI perception")
+        current_perception = await pipeline.perception.generate(
+            store_context,
+            simulations,
+            verifications,
+            findings,
+            demo_mode=demo_mode,
+        )
+        yield stream_event(
+            "progress",
+            stage="perception",
+            status="complete",
+            message=f"Current perception: {current_perception.perceived_as}",
+        )
+
         yield stream_event("progress", stage="fixes", status="started", message="Generating fix proposals")
         fixes = await pipeline.fixes.generate_many(store_context, findings, queries, demo_mode=demo_mode)
         yield stream_event("progress", stage="fixes", status="complete", message=f"Generated {len(fixes)} fix proposals")
@@ -382,6 +426,7 @@ async def audit_event_stream(request: AuditRequest) -> AsyncIterator[str]:
         ]
         combined_after_verifications.extend(after_verifications)
         score = pipeline.scorer.calculate(queries, verifications, combined_after_verifications, store_context, fixed_context)
+        score.current_perception = current_perception
         failures = build_failure_replays(simulations, verifications, findings, fixes, after_simulations, after_verifications)
         result = AuditResult(
             audit_id=audit_id_for(request.store_url),
