@@ -140,7 +140,7 @@ function HistoryPage() {
               </button>
             ) : null}
             <Link to="/" className="btn-primary inline-flex items-center gap-1.5">
-              New Audit <ArrowRight className="h-4 w-4" />
+              Enter Store URL <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
         </section>

@@ -7,6 +7,11 @@ export function TopNav({ showActions = false }: { showActions?: boolean }) {
   const isLanding = pathname === "/";
   const audit = typeof window === "undefined" ? null : loadAudit();
   const storeUrl = audit?.store_context.store_url || "hackathon-store.myshopify.com";
+  const focusAuditInput = () => {
+    const input = document.getElementById("audit-input") as HTMLInputElement | null;
+    input?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => input?.focus(), 250);
+  };
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background/70 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-6">
@@ -24,10 +29,22 @@ export function TopNav({ showActions = false }: { showActions?: boolean }) {
         {isLanding ? (
           <nav className="flex items-center gap-2 text-sm">
             <a href="#how" className="hidden px-3 py-1.5 text-muted-foreground hover:text-foreground sm:inline">How it works</a>
+            <Link to="/history" className="hidden px-3 py-1.5 text-muted-foreground hover:text-foreground sm:inline">History</Link>
             <Link to="/dashboard" className="btn-ghost text-sm">View Demo</Link>
+            <button type="button" onClick={focusAuditInput} className="btn-primary inline-flex items-center gap-1.5 text-sm">
+              Run Audit -&gt;
+            </button>
           </nav>
         ) : showActions ? (
           <nav className="flex items-center gap-2">
+            <Link
+              to="/"
+              className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                pathname === "/" ? "bg-surface text-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Home
+            </Link>
             <NavLink to="/dashboard" label="Overview" />
             <NavLink to="/failures" label="Failures" />
             <NavLink to="/fixes" label="Fixes" />
