@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import desc, select, update
+from sqlalchemy import delete, desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.db.models import Audit, Finding, Fix, PersonaQuery, ScoreReport, Simulation, StoreContext
@@ -73,9 +73,33 @@ async def get_audit_by_id(db: AsyncSession, audit_id: str) -> Audit | None:
     return result.scalar_one_or_none()
 
 
-async def get_recent_audits(db: AsyncSession, limit: int = 10) -> list[Audit]:
-    result = await db.execute(select(Audit).order_by(desc(Audit.created_at)).limit(limit))
+async def get_recent_audits(db: AsyncSession, limit: int = 10, completed_only: bool = True) -> list[Audit]:
+    query = select(Audit)
+    if completed_only:
+        query = query.where(Audit.status == "complete")
+    result = await db.execute(query.order_by(desc(Audit.created_at)).limit(limit))
     return list(result.scalars().all())
+
+
+async def get_audits_by_store(db: AsyncSession, shop_url: str, completed_only: bool = True) -> list[Audit]:
+    query = select(Audit).where(Audit.shop_url == shop_url)
+    if completed_only:
+        query = query.where(Audit.status == "complete")
+    result = await db.execute(query.order_by(desc(Audit.created_at)))
+    return list(result.scalars().all())
+
+
+async def clear_test_audits_for_store(db: AsyncSession, shop_url: str) -> dict[str, Any]:
+    """Delete all audits for a store except the newest one."""
+
+    result = await db.execute(select(Audit).where(Audit.shop_url == shop_url).order_by(desc(Audit.created_at)))
+    audits = list(result.scalars().all())
+    if len(audits) <= 1:
+        return {"deleted_count": 0, "kept_audit_id": audits[0].audit_id if audits else None}
+    kept = audits[0]
+    delete_ids = [audit.audit_id for audit in audits[1:]]
+    await db.execute(delete(Audit).where(Audit.audit_id.in_(delete_ids)))
+    return {"deleted_count": len(delete_ids), "kept_audit_id": kept.audit_id}
 
 
 async def get_store_context(db: AsyncSession, audit_id: str) -> StoreContext | None:

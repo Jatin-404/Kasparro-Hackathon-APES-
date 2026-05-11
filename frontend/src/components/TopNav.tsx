@@ -1,9 +1,12 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import { Activity } from "lucide-react";
+import { loadAudit } from "@/lib/audit-api";
 
 export function TopNav({ showActions = false }: { showActions?: boolean }) {
   const { pathname } = useLocation();
   const isLanding = pathname === "/";
+  const audit = typeof window === "undefined" ? null : loadAudit();
+  const storeUrl = audit?.store_context.store_url || "hackathon-store.myshopify.com";
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background/70 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-6">
@@ -29,6 +32,15 @@ export function TopNav({ showActions = false }: { showActions?: boolean }) {
             <NavLink to="/failures" label="Failures" />
             <NavLink to="/fixes" label="Fixes" />
             <NavLink to="/plan" label="Action Plan" />
+            <Link
+              to="/history"
+              search={{ store: storeUrl } as any}
+              className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                pathname.startsWith("/history") ? "bg-surface text-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              History
+            </Link>
             <Link to="/audit" className="btn-ghost ml-2 text-sm">Re-run Audit</Link>
             <button className="btn-primary">Export Report</button>
           </nav>

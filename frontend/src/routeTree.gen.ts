@@ -10,15 +10,22 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as PlanRouteImport } from './routes/plan'
+import { Route as HistoryRouteImport } from './routes/history'
 import { Route as FixesRouteImport } from './routes/fixes'
 import { Route as FailuresRouteImport } from './routes/failures'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuditAuditIdRouteImport } from './routes/audit.$auditId'
 
 const PlanRoute = PlanRouteImport.update({
   id: '/plan',
   path: '/plan',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HistoryRoute = HistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FixesRoute = FixesRouteImport.update({
@@ -46,37 +53,64 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuditAuditIdRoute = AuditAuditIdRouteImport.update({
+  id: '/$auditId',
+  path: '/$auditId',
+  getParentRoute: () => AuditRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/audit': typeof AuditRoute
+  '/audit': typeof AuditRouteWithChildren
   '/dashboard': typeof DashboardRoute
   '/failures': typeof FailuresRoute
   '/fixes': typeof FixesRoute
+  '/history': typeof HistoryRoute
   '/plan': typeof PlanRoute
+  '/audit/$auditId': typeof AuditAuditIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/audit': typeof AuditRoute
+  '/audit': typeof AuditRouteWithChildren
   '/dashboard': typeof DashboardRoute
   '/failures': typeof FailuresRoute
   '/fixes': typeof FixesRoute
+  '/history': typeof HistoryRoute
   '/plan': typeof PlanRoute
+  '/audit/$auditId': typeof AuditAuditIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/audit': typeof AuditRoute
+  '/audit': typeof AuditRouteWithChildren
   '/dashboard': typeof DashboardRoute
   '/failures': typeof FailuresRoute
   '/fixes': typeof FixesRoute
+  '/history': typeof HistoryRoute
   '/plan': typeof PlanRoute
+  '/audit/$auditId': typeof AuditAuditIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/audit' | '/dashboard' | '/failures' | '/fixes' | '/plan'
+  fullPaths:
+    | '/'
+    | '/audit'
+    | '/dashboard'
+    | '/failures'
+    | '/fixes'
+    | '/history'
+    | '/plan'
+    | '/audit/$auditId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/audit' | '/dashboard' | '/failures' | '/fixes' | '/plan'
+  to:
+    | '/'
+    | '/audit'
+    | '/dashboard'
+    | '/failures'
+    | '/fixes'
+    | '/history'
+    | '/plan'
+    | '/audit/$auditId'
   id:
     | '__root__'
     | '/'
@@ -84,15 +118,18 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/failures'
     | '/fixes'
+    | '/history'
     | '/plan'
+    | '/audit/$auditId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AuditRoute: typeof AuditRoute
+  AuditRoute: typeof AuditRouteWithChildren
   DashboardRoute: typeof DashboardRoute
   FailuresRoute: typeof FailuresRoute
   FixesRoute: typeof FixesRoute
+  HistoryRoute: typeof HistoryRoute
   PlanRoute: typeof PlanRoute
 }
 
@@ -103,6 +140,13 @@ declare module '@tanstack/react-router' {
       path: '/plan'
       fullPath: '/plan'
       preLoaderRoute: typeof PlanRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/history': {
+      id: '/history'
+      path: '/history'
+      fullPath: '/history'
+      preLoaderRoute: typeof HistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/fixes': {
@@ -140,15 +184,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/audit/$auditId': {
+      id: '/audit/$auditId'
+      path: '/$auditId'
+      fullPath: '/audit/$auditId'
+      preLoaderRoute: typeof AuditAuditIdRouteImport
+      parentRoute: typeof AuditRoute
+    }
   }
 }
 
+interface AuditRouteChildren {
+  AuditAuditIdRoute: typeof AuditAuditIdRoute
+}
+
+const AuditRouteChildren: AuditRouteChildren = {
+  AuditAuditIdRoute: AuditAuditIdRoute,
+}
+
+const AuditRouteWithChildren = AuditRoute._addFileChildren(AuditRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AuditRoute: AuditRoute,
+  AuditRoute: AuditRouteWithChildren,
   DashboardRoute: DashboardRoute,
   FailuresRoute: FailuresRoute,
   FixesRoute: FixesRoute,
+  HistoryRoute: HistoryRoute,
   PlanRoute: PlanRoute,
 }
 export const routeTree = rootRouteImport

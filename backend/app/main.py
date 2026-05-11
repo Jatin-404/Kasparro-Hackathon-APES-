@@ -187,31 +187,83 @@ async def crawl_demo_store() -> dict:
     return build_demo_store_context().model_dump(by_alias=True, exclude_none=False)
 
 
-@app.get("/api/audits/recent")
-async def recent_audits(db: Any = Depends(get_db)) -> list[dict[str, Any]]:
-    """List the ten most recent persisted audits."""
+@app.get("/api/audits")
+async def audits_by_store(shop_url: str, db: Any = Depends(get_db)) -> list[dict[str, Any]]:
+    """List completed persisted audits for one store, newest first."""
 
     if repo is None:
         raise HTTPException(status_code=503, detail="Database persistence is not installed")
     if not db_enabled():
         raise HTTPException(status_code=503, detail="Database persistence is disabled")
-    audits = await repo.get_recent_audits(db)
-    return [
-        {
-            "audit_id": audit.audit_id,
-            "shop_url": audit.shop_url,
-            "store_name": audit.store_name,
-            "status": audit.status,
-            "before_score": audit.before_score,
-            "after_score": audit.after_score,
-            "score_delta": audit.after_score - audit.before_score
-            if audit.before_score is not None and audit.after_score is not None
-            else None,
-            "created_at": audit.created_at.isoformat() if audit.created_at else None,
-            "completed_at": audit.completed_at.isoformat() if audit.completed_at else None,
-        }
-        for audit in audits
-    ]
+    audits = await repo.get_audits_by_store(db, shop_url)
+    return [audit_summary(audit) for audit in audits]
+
+
+@app.get("/api/audits/recent")
+async def recent_audits(limit: int = 20, db: Any = Depends(get_db)) -> list[dict[str, Any]]:
+    """List the most recent completed persisted audits across stores."""
+
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Database persistence is not installed")
+    if not db_enabled():
+        raise HTTPException(status_code=503, detail="Database persistence is disabled")
+    audits = await repo.get_recent_audits(db, limit=max(1, min(limit, 100)), completed_only=True)
+    return [audit_summary(audit) for audit in audits]
+
+
+@app.delete("/api/audits/clear-test")
+async def clear_test_audits(shop_url: str, db: Any = Depends(get_db)) -> dict[str, Any]:
+    """Delete all audits for one store except the most recent run."""
+
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Database persistence is not installed")
+    if not db_enabled():
+        raise HTTPException(status_code=503, detail="Database persistence is disabled")
+    result = await repo.clear_test_audits_for_store(db, shop_url)
+    return {"shop_url": shop_url, **result}
+
+
+@app.get("/api/audits/compare")
+async def compare_audits(audit_a: str, audit_b: str, db: Any = Depends(get_db)) -> dict[str, Any]:
+    """Compare two persisted audit runs side by side."""
+
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Database persistence is not installed")
+    if not db_enabled():
+        raise HTTPException(status_code=503, detail="Database persistence is disabled")
+
+    async def fetch(audit_id: str) -> tuple[Any, Any, list[Any]]:
+        audit = await repo.get_audit_by_id(db, audit_id)
+        score = await repo.get_score_report(db, audit_id)
+        findings = await repo.get_findings(db, audit_id)
+        return audit, score, findings
+
+    a_audit, a_score, a_findings = await fetch(audit_a)
+    b_audit, b_score, b_findings = await fetch(audit_b)
+    if not a_audit or not b_audit:
+        raise HTTPException(status_code=404, detail="One or both audits not found")
+
+    score_change = (
+        b_audit.before_score - a_audit.before_score
+        if a_audit.before_score is not None and b_audit.before_score is not None
+        else 0
+    )
+    failed_change = (
+        b_audit.failed_queries - a_audit.failed_queries
+        if a_audit.failed_queries is not None and b_audit.failed_queries is not None
+        else None
+    )
+    high_change = count_by_severity(b_findings, "high") - count_by_severity(a_findings, "high")
+    return {
+        "audit_a": compare_side(a_audit, a_score, a_findings),
+        "audit_b": compare_side(b_audit, b_score, b_findings),
+        "delta": {
+            "score_change": score_change,
+            "direction": "improved" if score_change > 0 else "declined" if score_change < 0 else "unchanged",
+            "failed_queries_change": failed_change,
+            "high_findings_change": high_change,
+        },
+    }
 
 
 @app.get("/api/audit/{audit_id}")
@@ -229,6 +281,7 @@ async def get_saved_audit(audit_id: str, db: Any = Depends(get_db)) -> dict[str,
     findings = await repo.get_findings(db, audit_id)
     fixes = await repo.get_fixes(db, audit_id)
     score = await repo.get_score_report(db, audit_id)
+    store_context = await repo.get_store_context(db, audit_id)
     return {
         "audit_id": audit.audit_id,
         "shop_url": audit.shop_url,
@@ -240,11 +293,14 @@ async def get_saved_audit(audit_id: str, db: Any = Depends(get_db)) -> dict[str,
         if audit.before_score is not None and audit.after_score is not None
         else None,
         "failed_queries": audit.failed_queries,
+        "total_queries": audit.total_queries,
         "high_impact_fixes": audit.high_impact_fixes,
+        "store_context": row_to_dict(store_context) if store_context else None,
         "simulations": [row_to_dict(row) for row in simulations],
         "findings": [row_to_dict(row) for row in findings],
         "fixes": [row_to_dict(row) for row in fixes],
         "score": row_to_dict(score) if score else None,
+        "action_plan": score.action_plan if score else [],
         "created_at": audit.created_at.isoformat() if audit.created_at else None,
         "completed_at": audit.completed_at.isoformat() if audit.completed_at else None,
     }
@@ -301,6 +357,8 @@ def stream_event(event_type: str, **payload: object) -> str:
 def row_to_dict(row: Any) -> dict[str, Any]:
     """Convert a SQLAlchemy row object to a JSON-safe dict."""
 
+    if row is None:
+        return {}
     data = {}
     for column in row.__table__.columns:
         value = getattr(row, column.name)
@@ -310,6 +368,42 @@ def row_to_dict(row: Any) -> dict[str, Any]:
             value = str(value)
         data[column.name] = value
     return data
+
+
+def audit_summary(audit: Any) -> dict[str, Any]:
+    """Return the compact audit row used by history views."""
+
+    return {
+        "audit_id": audit.audit_id,
+        "shop_url": audit.shop_url,
+        "store_name": audit.store_name,
+        "status": audit.status,
+        "before_score": audit.before_score,
+        "after_score": audit.after_score,
+        "score_delta": audit.after_score - audit.before_score
+        if audit.before_score is not None and audit.after_score is not None
+        else None,
+        "failed_queries": audit.failed_queries,
+        "high_impact_fixes": audit.high_impact_fixes,
+        "created_at": audit.created_at.isoformat() if audit.created_at else None,
+        "completed_at": audit.completed_at.isoformat() if audit.completed_at else None,
+    }
+
+
+def count_by_severity(findings: list[Any], severity: str) -> int:
+    return len([finding for finding in findings if finding.severity == severity])
+
+
+def compare_side(audit: Any, score: Any, findings: list[Any]) -> dict[str, Any]:
+    return {
+        "audit_id": audit.audit_id,
+        "created_at": audit.created_at.isoformat() if audit.created_at else None,
+        "before_score": audit.before_score,
+        "after_score": audit.after_score,
+        "failed_queries": audit.failed_queries,
+        "high_findings": count_by_severity(findings, "high"),
+        "dimensions": score.before_dimensions if score else [],
+    }
 
 
 async def audit_event_stream(request: AuditRequest) -> AsyncIterator[str]:

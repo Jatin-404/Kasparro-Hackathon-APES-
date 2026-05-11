@@ -68,6 +68,47 @@ export interface BrandGapAnalysis {
   };
 }
 
+export interface AuditSummary {
+  audit_id: string;
+  shop_url: string;
+  store_name: string | null;
+  status: "pending" | "running" | "complete" | "failed" | string;
+  before_score: number | null;
+  after_score: number | null;
+  score_delta: number | null;
+  failed_queries: number | null;
+  high_impact_fixes: number | null;
+  created_at: string | null;
+  completed_at: string | null;
+}
+
+export interface AuditCompareResult {
+  audit_a: AuditCompareSide;
+  audit_b: AuditCompareSide;
+  delta: {
+    score_change: number;
+    direction: "improved" | "declined" | "unchanged";
+    failed_queries_change: number | null;
+    high_findings_change: number | null;
+  };
+}
+
+export interface AuditCompareSide {
+  audit_id: string;
+  created_at: string | null;
+  before_score: number | null;
+  after_score: number | null;
+  failed_queries: number | null;
+  high_findings: number;
+  dimensions: Array<ApiDimension>;
+}
+
+export interface ClearTestAuditsResult {
+  shop_url: string;
+  deleted_count: number;
+  kept_audit_id: string | null;
+}
+
 export interface AuditProgressEvent {
   type: "progress" | "result" | "error";
   stage?: "crawl" | "personas" | "simulations" | "verification" | "forensics" | "perception" | "fixes" | "resimulation" | "scoring";
@@ -78,7 +119,7 @@ export interface AuditProgressEvent {
   result?: AuditResult;
 }
 
-interface ApiDimension {
+export interface ApiDimension {
   dimension: "product_clarity" | "policy_completeness" | "trust_signals" | "faq_coverage";
   label: string;
   score: number;
@@ -205,6 +246,32 @@ export async function analyzeBrandGap(auditId: string, payload: BrandGapRequest)
   return response.json();
 }
 
+export async function fetchAuditsByStore(shopUrl: string): Promise<AuditSummary[]> {
+  return fetchJson(`${API_BASE}/api/audits?shop_url=${encodeURIComponent(shopUrl)}`, "Audit history");
+}
+
+export async function fetchRecentAudits(limit = 20): Promise<AuditSummary[]> {
+  return fetchJson(`${API_BASE}/api/audits/recent?limit=${limit}`, "Recent audits");
+}
+
+export async function compareAudits(auditA: string, auditB: string): Promise<AuditCompareResult> {
+  return fetchJson(
+    `${API_BASE}/api/audits/compare?audit_a=${encodeURIComponent(auditA)}&audit_b=${encodeURIComponent(auditB)}`,
+    "Audit comparison",
+  );
+}
+
+export async function fetchSavedAudit(auditId: string): Promise<AuditResult> {
+  const saved = await fetchJson<SavedAuditResponse>(`${API_BASE}/api/audit/${encodeURIComponent(auditId)}`, "Saved audit");
+  return savedAuditToResult(saved);
+}
+
+export async function clearTestAudits(shopUrl: string): Promise<ClearTestAuditsResult> {
+  return fetchJson(`${API_BASE}/api/audits/clear-test?shop_url=${encodeURIComponent(shopUrl)}`, "Clear test audits", {
+    method: "DELETE",
+  });
+}
+
 export function saveAudit(result: AuditResult) {
   if (typeof window === "undefined") return;
   window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(result));
@@ -306,4 +373,88 @@ function explanationFor(value: ApiDimension["dimension"], result: AuditResult) {
 function titleFor(failure: ApiFailure) {
   if (failure.fix?.content_type) return failure.fix.content_type.replace(/\b\w/g, (char) => char.toUpperCase());
   return failure.location.replace("product:", "Product: ").replace("policy:", "Policy: ");
+}
+
+async function fetchJson<T>(endpoint: string, label: string, init?: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(endpoint, init);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "network request failed";
+    throw new Error(`${label} request failed at ${endpoint}: ${reason}`);
+  }
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`${label} failed with HTTP ${response.status}: ${detail}`);
+  }
+  return response.json();
+}
+
+interface SavedAuditResponse {
+  audit_id: string;
+  shop_url: string;
+  store_name: string | null;
+  status: string;
+  failed_queries: number | null;
+  total_queries: number | null;
+  high_impact_fixes: number | null;
+  store_context: {
+    store_data?: AuditResult["store_context"];
+    gaps_detected?: AuditResult["store_context"]["gaps_detected"];
+  } | null;
+  simulations: Array<Record<string, any>>;
+  findings: Array<Record<string, any>>;
+  fixes: Array<Record<string, any>>;
+  score: AuditResult["score"] & { action_plan?: string[] };
+  action_plan?: string[];
+}
+
+function savedAuditToResult(saved: SavedAuditResponse): AuditResult {
+  const storeData = saved.store_context?.store_data;
+  const findingsByQuery = new Map(saved.findings.map((finding) => [finding.query_id, finding]));
+  const fixesByQuery = new Map(saved.fixes.map((fix) => [fix.query_id, fix]));
+  const failures = saved.simulations
+    .filter((simulation) => simulation.classification && simulation.classification !== "CONFIDENT_CORRECT")
+    .map((simulation, index) => {
+      const finding = findingsByQuery.get(simulation.query_id) || {};
+      const fix = fixesByQuery.get(simulation.query_id);
+      return {
+        query_id: simulation.query_id || `q${index + 1}`,
+        persona: simulation.persona || "Shopper",
+        query: simulation.query || "",
+        response: simulation.response || "",
+        classification: simulation.classification || "VAGUE",
+        severity: finding.severity || simulation.severity || "medium",
+        root_cause: finding.specific_issue || "Saved audit issue",
+        location: finding.location || "store",
+        dimension: simulation.dimension || "product_clarity",
+        after_response: simulation.after_response || null,
+        after_classification: simulation.after_classification || null,
+        fix: fix
+          ? {
+              content_type: fix.content_type || "content",
+              original_content: fix.original_content || null,
+              improved_content: fix.improved_content || "Merchant input needed.",
+              confidence_improvement_reason: fix.confidence_improvement_reason || "",
+              impact_points: fix.impact_points || 0,
+            }
+          : null,
+      } as ApiFailure;
+    });
+  return {
+    audit_id: saved.audit_id,
+    store_context: {
+      store_name: storeData?.store_name ?? saved.store_name,
+      store_url: storeData?.store_url ?? saved.shop_url,
+      products: storeData?.products ?? [],
+      faqs: storeData?.faqs ?? [],
+      gaps_detected: storeData?.gaps_detected ?? saved.store_context?.gaps_detected ?? [],
+    },
+    score: saved.score,
+    failures,
+    failed_queries: saved.failed_queries ?? failures.length,
+    total_queries: saved.total_queries ?? saved.simulations.length,
+    high_impact_fixes: saved.high_impact_fixes ?? saved.fixes.length,
+    action_plan: saved.action_plan ?? saved.score?.action_plan ?? [],
+  };
 }

@@ -1,7 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TopNav } from "@/components/TopNav";
 import { ArrowRight, Search, Brain, Wrench, TrendingUp, Terminal } from "lucide-react";
+import { fetchAuditsByStore, type AuditSummary } from "@/lib/audit-api";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -18,6 +19,36 @@ export const Route = createFileRoute("/")({
 function Landing() {
   const navigate = useNavigate();
   const [url, setUrl] = useState("");
+  const [previousAudits, setPreviousAudits] = useState<AuditSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const storeUrl = url.trim();
+
+  useEffect(() => {
+    if (!storeUrl || storeUrl.length < 6) {
+      setPreviousAudits([]);
+      return;
+    }
+    let mounted = true;
+    const timer = window.setTimeout(() => {
+      setHistoryLoading(true);
+      fetchAuditsByStore(storeUrl)
+        .then((audits) => {
+          if (mounted) setPreviousAudits(audits);
+        })
+        .catch(() => {
+          if (mounted) setPreviousAudits([]);
+        })
+        .finally(() => {
+          if (mounted) setHistoryLoading(false);
+        });
+    }, 450);
+    return () => {
+      mounted = false;
+      window.clearTimeout(timer);
+    };
+  }, [storeUrl]);
+
+  const lastAudit = previousAudits[0];
 
   return (
     <div className="min-h-screen">
@@ -91,6 +122,30 @@ function Landing() {
                 View Demo Audit →
               </Link>
             </div>
+            {storeUrl && (historyLoading || lastAudit) ? (
+              <div className="mt-5 rounded-xl border border-primary/30 bg-primary/10 p-4 text-left">
+                {historyLoading ? (
+                  <div className="h-16 animate-pulse rounded-lg bg-background/60" />
+                ) : lastAudit ? (
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="font-display font-semibold">Previous audit found</div>
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        Last score: {lastAudit.before_score ?? "-"}/100 · {formatAuditDate(lastAudit.created_at)}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Link to="/audit/$auditId" params={{ auditId: lastAudit.audit_id }} className="btn-ghost text-sm">
+                        View Last Audit
+                      </Link>
+                      <button type="submit" className="btn-primary text-sm">
+                        Run New Audit
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </form>
 
           <div
@@ -126,4 +181,9 @@ function Landing() {
       </main>
     </div>
   );
+}
+
+function formatAuditDate(value: string | null) {
+  if (!value) return "recently";
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
 }
